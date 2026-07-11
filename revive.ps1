@@ -22,6 +22,7 @@
 #    powershell -ExecutionPolicy Bypass -File revive.ps1 -Mode FullFlash
 #    powershell -ExecutionPolicy Bypass -File revive.ps1 -Mode Backup
 #    powershell -ExecutionPolicy Bypass -File revive.ps1 -Mode CrashLog
+#    powershell -ExecutionPolicy Bypass -File revive.ps1 -Port COM3       # force port
 #    powershell -ExecutionPolicy Bypass -File revive.ps1 -Mode EfsWipe    # LAST RESORT
 #    powershell -ExecutionPolicy Bypass -File revive.ps1 -Mode EfsRestore # LAST RESORT (donor EFS)
 #
@@ -43,6 +44,8 @@ param(
     # FullFlash: also flash the donor cache image (default: cache is erased,
     # the device rebuilds it - that is the donor-proven flow).
     [switch]$FlashCache,
+    # Force the COM port (e.g. -Port COM3 or -Port 3) if auto-detect misses it.
+    [string]$Port = '',
     # Skip interactive confirmations (for the brave).
     [switch]$Yes
 )
@@ -156,7 +159,30 @@ function Wait-ForState([string[]]$wanted, [int]$seconds) {
 function Enter-Loader([int]$com) {
     Head "Loading flash programmer (qdload -p$com -i -k10)"
     $out = Invoke-QTool 'qdload.exe' "-p$com -i -k10"
-    if ($out -match 'Hello packet not received' -or $out -notmatch 'Flash chip:') {
+    if ($out -match 'Read memory command failed' -or $out -match 'Unknown Flash ID = 00') {
+        # The loader was sent and is running (it probes the flash itself and
+        # may even name the right chip in the banner), but its peek/memory-read
+        # command channel returns nothing - so the -i register setup read zeros
+        # and every geometry line below it is fabricated (Sector size: 0,
+        # R-S ECC, Flash ID = 00). That is a dead command channel, NOT a
+        # different NAND chip. Probe once via qcommand before giving up.
+        $probe = Invoke-QTool 'qcommand.exe' "-p$com -k10 -c `"d $REG_ADDR c`""
+        if ($probe -notmatch '079b0020:') {
+            throw ("The flash programmer loaded but does not answer memory reads`n" +
+                   "('Read memory command failed' / 'Unknown Flash ID = 00'). The banner`n" +
+                   "geometry below that line is garbage computed from the failed reads -`n" +
+                   "this is a connection/session problem, NOT a different flash chip.`n" +
+                   "Fix, in order:`n" +
+                   " 1. Pull the battery, wait 10 s, re-enter EDL via the test point and`n" +
+                   "    rerun IMMEDIATELY (a stale Sahara session - e.g. after a QFIL/QPST`n" +
+                   "    attempt - looks exactly like this).`n" +
+                   " 2. Plug into a direct/rear USB port with a short data cable - no hubs.`n" +
+                   " 3. Close other Qualcomm tools (QFIL/QPST/driver utilities) that may`n" +
+                   "    be holding the port.`n" +
+                   "qdload said:`n$out")
+        }
+        Say "peek channel answered on the qcommand probe - continuing." Yellow
+    } elseif ($out -match 'Hello packet not received' -or $out -notmatch 'Flash chip:') {
         # A loader may already be resident from a previous run of this script -
         # in that case qdload fails but qcommand still works. Probe it.
         $probe = Invoke-QTool 'qcommand.exe' "-p$com -k10 -c `"d $REG_ADDR c`""
@@ -661,6 +687,13 @@ foreach ($need in @('qtool\qdload.exe','qtool\qcommand.exe','qtool\qrflash.exe',
 }
 
 $dev = Get-DeviceState
+if ($Port) {
+    $pnum = $Port -replace '\D',''
+    if (-not $pnum) { throw "-Port expects e.g. COM3 or 3 (got '$Port')" }
+    if ($dev.State -eq 'NONE') { $dev.State = 'EDL' }   # trust the user's port
+    $dev.Com = [int]$pnum
+    Say "COM port forced to COM$($dev.Com) by -Port." Yellow
+}
 Say "Detected device state: $($dev.State) $(if ($dev.Com) { "(COM$($dev.Com))" }) $($dev.Name)"
 
 switch ($dev.State) {
