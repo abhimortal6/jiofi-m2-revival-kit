@@ -52,3 +52,4 @@ press `7`.** Then install the driver — it works until you next reboot.
   ever write your *own* device's IMEI.
 - Built on **qtools** (forth32, GPLv3) + patched loaders (bkerler). Attribution
   and licenses in [NOTICE](NOTICE); original script/docs are MIT ([LICENSE](LICENSE)).
+- Thanks to **sheikhshahnawaz41299** for the firmware backups and tools.

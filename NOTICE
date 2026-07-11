@@ -30,6 +30,9 @@ documentation are original to this repository (MIT, see LICENSE).
    calibration. Publishing it would publish a real IMEI. See README for the
    own-IMEI-only policy.
 
+Thanks to sheikhshahnawaz41299 for the JioFi M2 Ver-2 firmware backups and
+tools that helped make this kit possible.
+
 The Qualcomm IMEI-writing tool referenced in the disaster-recovery flow is
 NOT included in this repository for legal reasons; obtain it yourself only for
 restoring your own device's original IMEI.
