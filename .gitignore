@@ -1,0 +1,21 @@
+# Per-run output the kit creates (backups, dumps, logs) — never commit
+rescue_*/
+memdump/
+*.log
+
+# NEVER commit device identity / EFS dumps (they contain a real IMEI)
+*EFS2*
+*efs2*
+*.efs
+backup_*/
+*-identity*
+
+# Firmware images ARE committed so newbies can clone-and-run. Two exceptions:
+#  - cache.oob is >100 MB (GitHub's hard limit) AND the kit erases cache by
+#    default, so it is not needed. Dump your own if you ever use -FlashCache.
+images/17-0-cache.oob
+
+# Windows / editor cruft
+Thumbs.db
+desktop.ini
+*.tmp
