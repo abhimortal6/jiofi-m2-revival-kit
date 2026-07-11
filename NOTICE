@@ -1,0 +1,35 @@
+JioFi M2 Revival Kit — third-party components and attribution
+=============================================================
+
+This project bundles and builds on the work of others. Their licenses and
+attribution are preserved here as required. Only revive.ps1 and the
+documentation are original to this repository (MIT, see LICENSE).
+
+1. qtools  (qdload, qrflash, qwdirect, qbadblock, qcommand, qefs, qnvram, ...)
+   Author:  forth32
+   Source:  https://github.com/forth32/qtools
+   License: GNU GPL v3 — full text in qtool/LICENSE, original readme in
+            qtool/README.md. Redistributed unmodified.
+
+2. Patched "peek"/streaming NAND loaders (loaders/ENPRG9x07p.mbn,
+   ENPRG9x45p.bin, NPRG9x45p.bin, etc.)
+   Origin:  bkerler's Loaders collection
+   Source:  https://github.com/bkerler/Loaders
+   These low-level programmers are what allow the NAND controller to be
+   initialised correctly on MDM9x07 hardware.
+
+3. Device firmware images (images/*.oob)
+   These are Reliance Jio / JioFi M2 proprietary firmware, dumped from a
+   physical device. They are NOT included in this repository. They are the
+   property of their respective rights holders and are distributed only as a
+   convenience within the hobbyist repair community. If you are a rights
+   holder and want them removed from any mirror, that request will be honored.
+
+4. EFS2 / device-identity data
+   Intentionally NOT included. EFS2 carries a device's IMEI and RF
+   calibration. Publishing it would publish a real IMEI. See README for the
+   own-IMEI-only policy.
+
+The Qualcomm IMEI-writing tool referenced in the disaster-recovery flow is
+NOT included in this repository for legal reasons; obtain it yourself only for
+restoring your own device's original IMEI.
