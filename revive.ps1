@@ -1,5 +1,5 @@
 # =============================================================================
-#  JioFi M2 Ver-2 (Foxconn PEG_M2_B37 / "Pegasus M2") REVIVAL SCRIPT
+#  JioFi M2 Ver-2 (PEG_M2_B37 / "Pegasus M2") REVIVAL SCRIPT
 # =============================================================================
 #  Revives a bricked/boot-looping JioFi M2 Ver-2 (Qualcomm MDM9x07 class,
 #  Toshiba KSLCMBL2VA2M2A 512MiB NAND, 4K pages + 128B OOB, BCH-8 ECC,

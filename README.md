@@ -1,6 +1,6 @@
 # JioFi M2 Ver-2 Revival Kit (PEG_M2_B37 / "Pegasus M2")
 
-Un-brick a dead or boot-looping **JioFi M2 Ver-2** (Foxconn PEG_M2_B37, Qualcomm
+Un-brick a dead or boot-looping **JioFi M2 Ver-2** (PEG_M2_B37, Qualcomm
 MDM9x07-class, Toshiba KSLCMBL2VA2M2A 512 MiB NAND). One PowerShell script does
 everything — detect the device's state, diagnose *why* it won't boot, and repair
 it. Runs on stock **Windows 10/11** with the built-in PowerShell; no QPST/QFIL.
