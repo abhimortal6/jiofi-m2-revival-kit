@@ -224,10 +224,14 @@ function Set-NandRegs([int]$com) {
 function Read-RawBlocks([int]$com, [int]$startBlk, [int]$numBlk, [string]$outFile) {
     $bh = '{0:x}' -f $startBlk; $lh = '{0:x}' -f $numBlk
     $out = Invoke-QTool 'qrflash.exe' "-p$com -k10 -x -e -ui -z128 -b$bh -l$lh -o `"$outFile`""
-    if (-not (Test-Path $outFile)) { throw "raw read produced no file:`n$out" }
+    # qrflash removes its output file when the read fails mid-way; the file can
+    # still be visible (delete-pending) for a moment, so don't trust Test-Path -
+    # resolve once via Get-Item and treat any miss as "no file". Always include
+    # qrflash's own output: it is the only record of WHY the read failed.
+    $item = Get-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
+    if (-not $item) { throw "raw read produced no file. qrflash said:`n$out" }
     $want = $numBlk * $RAWBLOCK
-    $got = (Get-Item $outFile).Length
-    if ($got -ne $want) { throw "raw read short: got $got, expected $want bytes" }
+    if ($item.Length -ne $want) { throw "raw read short: got $($item.Length), expected $want bytes. qrflash said:`n$out" }
 }
 
 function Erase-Blocks([int]$com, [int]$startBlk, [int]$numBlk) {
@@ -244,6 +248,28 @@ function Get-MarkedBadBlocks([int]$com, [int]$startBlk, [int]$numBlk) {
         $bad += [Convert]::ToInt32($m.Groups[1].Value, 16)
     }
     return ,$bad
+}
+
+# Whole-region "marked bad" is never real wear (factory-bad = a block or two).
+# It is the spurious-marks signature seen on the donor rescue: a previous flash
+# attempt (QFIL/QPST, or a loader with the wrong OOB layout) wrote the region,
+# leaving non-FF bytes where the correct config reads the bad-block marker
+# (user+0x175) - every good block then LOOKS bad. The marks can also be a
+# misread if this session's command channel is flaky (this device needed the
+# qcommand fallback to load at all).
+function Test-AllBlocksBad([int[]]$bad, [int]$regionLen) {
+    if ($bad.Count -lt $regionLen) { return $false }
+    Say ""
+    Say "EVERY block in the region scans as marked-bad. That is NOT real NAND wear -" Yellow
+    Say "it is the 'spurious bad marks' signature: a previous flashing attempt wrote" Yellow
+    Say "this region with the wrong OOB layout (QFIL/QPST or a bad loader), so the" Yellow
+    Say "bad-block marker byte (user+0x175) is non-FF in every block." Yellow
+    Say "The raw backup below is attempted anyway (-ui ignores the marks). If it" Yellow
+    Say "succeeds, KEEP IT - it is the evidence needed to confirm the marks are" Yellow
+    Say "spurious before anything gets erased. Do NOT run EfsWipe/EfsRestore on" Yellow
+    Say "this device yet; open an issue on the kit's GitHub page with the rescue_*" Yellow
+    Say "folder attached." Yellow
+    return $true
 }
 
 function Compare-Bytes([byte[]]$a, [byte[]]$b) {
@@ -358,9 +384,11 @@ function Mode-Diagnose([int]$com) {
     Head "Scanning EFS2 region for marked-bad blocks"
     $bad = Get-MarkedBadBlocks $com $EFS_START $EFS_LEN
     Say ("Marked bad in EFS region: " + $(if ($bad.Count) { ($bad | ForEach-Object { '0x{0:x2}' -f $_ }) -join ', ' } else { 'none' }))
+    $allBad = Test-AllBlocksBad $bad $EFS_LEN
     $raw = Mode-Backup $com
     $an = Analyze-EfsLog $raw $bad
     Show-EfsAnalysis $an
+    if ($allBad) { Say ">> Region-wide bad marks present - treat the verdict above as UNRELIABLE." Yellow }
     # SBL sanity: compare first block against donor image
     Head "SBL quick check (block 0 vs donor image)"
     $sblRaw = Join-Path $OUTDIR 'sbl_blk0_raw.bin'
@@ -383,6 +411,12 @@ function Mode-EfsFix([int]$com) {
     Enter-Loader $com
     New-OutDir
     $bad = Get-MarkedBadBlocks $com $EFS_START $EFS_LEN
+    if (Test-AllBlocksBad $bad $EFS_LEN) {
+        Mode-Backup $com | Out-Null              # evidence, if it reads at all
+        Say "Refusing the log-region repair: with region-wide (spurious) bad marks the" Red
+        Say "analysis below would be meaningless and erasing would make things worse." Red
+        return
+    }
     $raw = Mode-Backup $com                      # backup FIRST, always
     $an = Analyze-EfsLog $raw $bad
     Show-EfsAnalysis $an
