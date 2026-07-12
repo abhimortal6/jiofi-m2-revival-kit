@@ -254,21 +254,18 @@ function Get-MarkedBadBlocks([int]$com, [int]$startBlk, [int]$numBlk) {
 # It is the spurious-marks signature seen on the donor rescue: a previous flash
 # attempt (QFIL/QPST, or a loader with the wrong OOB layout) wrote the region,
 # leaving non-FF bytes where the correct config reads the bad-block marker
-# (user+0x175) - every good block then LOOKS bad. The marks can also be a
-# misread if this session's command channel is flaky (this device needed the
-# qcommand fallback to load at all).
+# (user+0x175) - every good block then LOOKS bad.
 function Test-AllBlocksBad([int[]]$bad, [int]$regionLen) {
     if ($bad.Count -lt $regionLen) { return $false }
     Say ""
     Say "EVERY block in the region scans as marked-bad. That is NOT real NAND wear -" Yellow
-    Say "it is the 'spurious bad marks' signature: a previous flashing attempt wrote" Yellow
-    Say "this region with the wrong OOB layout (QFIL/QPST or a bad loader), so the" Yellow
-    Say "bad-block marker byte (user+0x175) is non-FF in every block." Yellow
-    Say "The raw backup below is attempted anyway (-ui ignores the marks). If it" Yellow
-    Say "succeeds, KEEP IT - it is the evidence needed to confirm the marks are" Yellow
-    Say "spurious before anything gets erased. Do NOT run EfsWipe/EfsRestore on" Yellow
-    Say "this device yet; open an issue on the kit's GitHub page with the rescue_*" Yellow
-    Say "folder attached." Yellow
+    Say "a previous flashing attempt (QFIL/QPST or a wrong-layout loader) scribbled" Yellow
+    Say "this region, so the bad-block marker byte (user+0x175) is non-FF in every" Yellow
+    Say "block. Treat this EFS as CORRUPTED. A raw backup is still attempted below" Yellow
+    Say "(-ui ignores the marks); if it fails too, the recovery path is:" Yellow
+    Say "    revive.ps1 -Mode EfsRestore" Cyan
+    Say "(flashes the donor EFS - afterwards you MUST rewrite YOUR OWN IMEI from" Yellow
+    Say "the device label with imei_tool\)." Yellow
     return $true
 }
 
@@ -385,10 +382,20 @@ function Mode-Diagnose([int]$com) {
     $bad = Get-MarkedBadBlocks $com $EFS_START $EFS_LEN
     Say ("Marked bad in EFS region: " + $(if ($bad.Count) { ($bad | ForEach-Object { '0x{0:x2}' -f $_ }) -join ', ' } else { 'none' }))
     $allBad = Test-AllBlocksBad $bad $EFS_LEN
-    $raw = Mode-Backup $com
-    $an = Analyze-EfsLog $raw $bad
-    Show-EfsAnalysis $an
-    if ($allBad) { Say ">> Region-wide bad marks present - treat the verdict above as UNRELIABLE." Yellow }
+    $an = $null
+    try {
+        $raw = Mode-Backup $com
+        $an = Analyze-EfsLog $raw $bad
+        Show-EfsAnalysis $an
+        if ($allBad) { Say ">> Region-wide bad marks present - treat the verdict above as UNRELIABLE." Yellow }
+    } catch {
+        Say "EFS2 raw backup FAILED - the EFS region is unreadable:" Red
+        Say $_.Exception.Message
+        Say ""
+        Say "An unreadable EFS is a corrupted EFS - there is nothing to repair in place." Yellow
+        Say ">> RECOMMENDED NEXT STEP: -Mode EfsRestore  (donor EFS; rewrite YOUR OWN" Cyan
+        Say ">> IMEI from the device label with imei_tool\ afterwards)" Cyan
+    }
     # SBL sanity: compare first block against donor image
     Head "SBL quick check (block 0 vs donor image)"
     $sblRaw = Join-Path $OUTDIR 'sbl_blk0_raw.bin'
@@ -399,7 +406,7 @@ function Mode-Diagnose([int]$com) {
     $d = Compare-Bytes $donor0 $mine
     if ($d -eq 0) {
         Say "SBL block 0 is byte-identical to the donor image - boot chain looks flashed/good." Green
-        if ($an.verdict -eq 'LOG_FULL') { Say ">> RECOMMENDED NEXT STEP: -Mode EfsFix" Cyan }
+        if ($an -and $an.verdict -eq 'LOG_FULL') { Say ">> RECOMMENDED NEXT STEP: -Mode EfsFix" Cyan }
     } else {
         Say "SBL block 0 differs from donor image in $d bytes." Yellow
         Say ">> RECOMMENDED NEXT STEP: -Mode FullFlash (then EfsFix if it still 900E-loops)" Cyan
@@ -412,9 +419,8 @@ function Mode-EfsFix([int]$com) {
     New-OutDir
     $bad = Get-MarkedBadBlocks $com $EFS_START $EFS_LEN
     if (Test-AllBlocksBad $bad $EFS_LEN) {
-        Mode-Backup $com | Out-Null              # evidence, if it reads at all
-        Say "Refusing the log-region repair: with region-wide (spurious) bad marks the" Red
-        Say "analysis below would be meaningless and erasing would make things worse." Red
+        try { Mode-Backup $com | Out-Null } catch { Say "EFS backup failed too - region unreadable." Yellow }
+        Say "EfsFix cannot repair a region-wide-corrupted EFS. Run: -Mode EfsRestore" Red
         return
     }
     $raw = Mode-Backup $com                      # backup FIRST, always
@@ -507,7 +513,13 @@ function Mode-FullFlash([int]$com) {
 function Mode-EfsWipe([int]$com) {
     Enter-Loader $com
     New-OutDir
-    $raw = Mode-Backup $com            # even a corrupt EFS is worth keeping
+    # even a corrupt EFS is worth keeping - but an unreadable one must not
+    # block the wipe: unreadable means corrupted, which is why we are here
+    $raw = $null
+    try { $raw = Mode-Backup $com } catch {
+        Say "EFS backup FAILED - the region is unreadable (corrupted). Continuing" Yellow
+        Say "WITHOUT a backup; there is nothing salvageable to keep." Yellow
+    }
     Say ""
     Say "################################################################" Red
     Say "#  FULL EFS2 WIPE - THIS ERASES IMEI AND RF CALIBRATION!       #" Red
@@ -517,8 +529,10 @@ function Mode-EfsWipe([int]$com) {
     Say "#  After the wipe you MUST rewrite the IMEI from the device    #" Red
     Say "#  label using imei_tool\ (write only your OWN device's IMEI). #" Red
     Say "################################################################" Red
-    Say "A raw backup of the current (corrupt) EFS was saved to:"
-    Say "  $raw"
+    if ($raw) {
+        Say "A raw backup of the current (corrupt) EFS was saved to:"
+        Say "  $raw"
+    }
     # deliberately NOT bypassable with -Yes: this destroys device identity
     $phrase = Read-Host "Type exactly: WIPE MY EFS   to proceed"
     if ($phrase -cne 'WIPE MY EFS') { Say "Aborted - nothing was changed." Yellow; return }
@@ -558,16 +572,25 @@ function Mode-EfsRestore([int]$com) {
     }
     Enter-Loader $com
     New-OutDir
-    $raw = Mode-Backup $com            # keep whatever is there now, always
+    # keep whatever is there now if it reads at all - but an unreadable
+    # (corrupted) EFS must not block the donor restore, it is the very
+    # reason to be here
+    $raw = $null
+    try { $raw = Mode-Backup $com } catch {
+        Say "EFS backup FAILED - the region is unreadable (corrupted). Continuing" Yellow
+        Say "WITHOUT a backup; the donor EFS will replace it entirely." Yellow
+    }
     Say ""
     Say "################################################################" Red
     Say "#  DONOR EFS FLASH - the device will carry the DONOR's IMEI!   #" Red
     Say "#  Use ONLY if the escalation ladder failed:                   #" Red
     Say "#    EfsFix -> EfsFix -EraseAllStale -> EfsWipe                 #" Red
+    Say "#  ...or if Diagnose reported the EFS unreadable / the whole   #" Red
+    Say "#  region marked bad (corrupted EFS - nothing left to save).   #" Red
     Say "#  MANDATORY AFTERWARDS: rewrite YOUR OWN device's IMEI (from  #" Red
     Say "#  its label) using imei_tool\ - do NOT keep the donor IMEI.   #" Red
     Say "################################################################" Red
-    Say "Backup of your current EFS: $raw"
+    if ($raw) { Say "Backup of your current EFS: $raw" }
     # deliberately NOT bypassable with -Yes: identity-affecting operation
     $phrase = Read-Host "Type exactly: FLASH DONOR EFS   to proceed"
     if ($phrase -cne 'FLASH DONOR EFS') { Say "Aborted - nothing was changed." Yellow; return }
