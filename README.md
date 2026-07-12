@@ -6,7 +6,7 @@ repairs it — **keeping your IMEI**. No QPST/QFIL needed.
 
 ## Download
 
-Get **`JioFi_M2_Revival_Kit_v1.1.zip`** from the [Releases](../../releases) page,
+Get **`JioFi_M2_Revival_Kit_v1.2.zip`** from the [Releases](../../releases) page,
 extract it (e.g. to `C:\JioFiKit`), and open PowerShell in that folder.
 
 ## Steps
